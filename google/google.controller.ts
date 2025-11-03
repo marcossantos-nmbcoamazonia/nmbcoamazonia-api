@@ -66,7 +66,7 @@ export class GoogleController {
   })
   async getSheetData(
     @Param('spreadsheetId') spreadsheetId: string,
-    @Query('range') range: string = 'A1:Z1000'
+    @Query('range') range: string = 'A1:Z200000'
   ) {
     return this.googleService.getSheetData(spreadsheetId, range);
   }
