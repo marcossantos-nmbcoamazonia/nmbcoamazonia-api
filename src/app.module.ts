@@ -4,6 +4,7 @@ import { AppController } from "./app.controller"
 import { AppService } from "./app.service"
 import { GoogleModule } from "../google/google.module"
 import { DocsCampanhaModule } from "../docs_campanha/docs-campanha.module"
+import { RdStationModule } from "../rdstation/rdstation.module"
 import googleConfig from "../config/google.config"
 
 @Module({
@@ -13,7 +14,8 @@ import googleConfig from "../config/google.config"
       load: [googleConfig],
     }),
     GoogleModule,
-    DocsCampanhaModule, // Novo módulo adicionado
+    DocsCampanhaModule,
+    RdStationModule,
   ],
   controllers: [AppController],
   providers: [AppService],
