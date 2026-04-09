@@ -16,9 +16,9 @@ interface TokenStore {
 export class RdStationService {
   private readonly logger = new Logger(RdStationService.name);
 
-  private readonly clientId = process.env.RDSTATION_CLIENT_ID;
-  private readonly clientSecret = process.env.RDSTATION_CLIENT_SECRET;
-  private readonly redirectUri = process.env.RDSTATION_REDIRECT_URI;
+  private readonly clientId = process.env.RDSTATION_CLIENT_ID ?? '';
+  private readonly clientSecret = process.env.RDSTATION_CLIENT_SECRET ?? '';
+  private readonly redirectUri = process.env.RDSTATION_REDIRECT_URI ?? '';
   private readonly authBaseUrl = 'https://api.rd.services/auth';
   private readonly apiBaseUrl = 'https://api.rd.services';
 
