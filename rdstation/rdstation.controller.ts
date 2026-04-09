@@ -77,6 +77,13 @@ export class RdStationController {
     return this.rdStationService.diagnose();
   }
 
+  // ─── 3c. Teste direto à API RD Station ───────────────────────────────────
+  @Get('test-api')
+  @ApiOperation({ summary: 'Testa chamada direta à API RD Station com o token salvo' })
+  async testApi() {
+    return this.rdStationService.testApiCall();
+  }
+
   // ─── 4. Status ────────────────────────────────────────────────────────────
   @Get('status')
   @ApiOperation({ summary: 'Verificar status da autorização RD Station' })
