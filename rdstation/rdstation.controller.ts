@@ -103,18 +103,15 @@ export class RdStationController {
   @ApiOperation({ summary: 'Buscar contatos/leads do RD Station' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'page_size', required: false, type: Number })
-  @ApiQuery({ name: 'email', required: false, type: String })
   @ApiResponse({ status: 200, description: 'Contatos retornados com sucesso' })
   async getLeads(
     @Query('page') page?: number,
     @Query('page_size') pageSize?: number,
-    @Query('email') email?: string,
   ) {
     try {
       const data = await this.rdStationService.getLeads({
         page: page ? Number(page) : 1,
         pageSize: pageSize ? Math.min(Number(pageSize), 125) : 100,
-        email,
       });
       return { success: true, data };
     } catch (error) {
@@ -137,6 +134,36 @@ export class RdStationController {
         pageSize: pageSize ? Math.min(Number(pageSize), 125) : 100,
       });
       return { success: true, data };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  // ─── 7. Resumo da LP Capital de Giro (visitantes + conversões) ───────────
+  @Get('lp-summary')
+  @ApiOperation({ summary: 'Resumo da LP capital-de-giro: visitantes, conversões, taxa de conversão' })
+  @ApiQuery({ name: 'start_date', required: false, type: String, description: 'Ex: 2026-03-30' })
+  @ApiQuery({ name: 'end_date', required: false, type: String, description: 'Ex: 2026-04-09' })
+  async getLpSummary(
+    @Query('start_date') startDate?: string,
+    @Query('end_date') endDate?: string,
+  ) {
+    try {
+      const data = await this.rdStationService.getLpSummary({ startDate, endDate });
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  // ─── 8. Leads da LP Capital de Giro ──────────────────────────────────────
+  @Get('lp-leads')
+  @ApiOperation({ summary: 'Buscar leads da LP capital-de-giro a partir de uma data (padrão: 2026-01-01)' })
+  @ApiQuery({ name: 'since', required: false, type: String, description: 'Data de corte ISO, ex: 2026-01-01' })
+  async getLpLeads(@Query('since') since?: string) {
+    try {
+      const contacts = await this.rdStationService.getLpLeads({ since });
+      return { success: true, total: contacts.length, contacts };
     } catch (error) {
       return { success: false, error: error.message };
     }

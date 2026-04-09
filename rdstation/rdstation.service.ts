@@ -88,29 +88,19 @@ export class RdStationService {
     try {
       const token = await this.getValidAccessToken();
       result.token_obtained = true;
-      result.token_preview = token.slice(0, 30) + '...';
 
-      // Testar endpoint contacts
-      const contactsResp = await axios.get(`${this.apiBaseUrl}/platform/contacts`, {
-        headers: { Authorization: `Bearer ${token}` },
-        params: { page_size: 1 },
+      const headers = { Authorization: `Bearer ${token}` };
+
+      // Analytics sem filtro de asset_id (funciona)
+      const r1 = await axios.get(`${this.apiBaseUrl}/platform/analytics/conversions`, {
+        headers,
+        params: { start_date: '2026-03-30', end_date: '2026-04-09', 'assets_type[]': 'LandingPage' },
         validateStatus: () => true,
       });
-      result.contacts_status = contactsResp.status;
-      result.contacts_headers = contactsResp.headers;
-      result.contacts_body = typeof contactsResp.data === 'string'
-        ? contactsResp.data.slice(0, 500)
-        : contactsResp.data;
+      const lpData = (r1.data?.conversions ?? []).find((c: any) => c.asset_identifier === 'capital-de-giro');
+      result.lp_summary = lpData ?? null;
+      result.analytics_status = r1.status;
 
-      // Testar endpoint de marketing account info
-      const accountResp = await axios.get(`${this.apiBaseUrl}/marketing/account_info`, {
-        headers: { Authorization: `Bearer ${token}` },
-        validateStatus: () => true,
-      });
-      result.account_status = accountResp.status;
-      result.account_body = typeof accountResp.data === 'string'
-        ? accountResp.data.slice(0, 500)
-        : accountResp.data;
     } catch (err) {
       result.error = err.message;
       result.detail = err?.response?.data;
@@ -209,9 +199,9 @@ export class RdStationService {
     if (!isExpired) {
       // Testar token atual contra a API
       try {
-        const test = await axios.get(`${this.apiBaseUrl}/platform/contacts?page_size=1`, {
+        const test = await axios.get(`${this.apiBaseUrl}/marketing/account_info`, {
           headers: { Authorization: `Bearer ${store.access_token}` },
-          validateStatus: () => true, // nunca lança exceção
+          validateStatus: () => true,
         });
 
         if (test.status !== 401) return store.access_token;
@@ -230,22 +220,84 @@ export class RdStationService {
 
   // ─── Leads / Contacts ────────────────────────────────────────────────────
 
-  async getLeads(params: { page?: number; pageSize?: number; email?: string } = {}): Promise<any> {
+  async getLeads(params: { page?: number; pageSize?: number } = {}): Promise<any> {
     const accessToken = await this.getValidAccessToken();
-    const { page = 1, pageSize = 100, email } = params;
+    const { page = 1, pageSize = 100 } = params;
 
-    const query: Record<string, any> = { page, page_size: pageSize };
-    if (email) query.email = email;
-
-    const response = await axios.get(`${this.apiBaseUrl}/platform/contacts`, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
+    // /platform/contacts retorna 500 no RD Station; usamos segmentação "Todos os contatos"
+    const response = await axios.get(
+      `${this.apiBaseUrl}/platform/segmentations/2925423/contacts`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        params: { page, page_size: pageSize },
       },
-      params: query,
-    });
+    );
 
     return response.data;
+  }
+
+  // Busca leads da LP capital-de-giro filtrando por last_conversion_date
+  async getLpLeads(params: { since?: string } = {}): Promise<any[]> {
+    const accessToken = await this.getValidAccessToken();
+    const headers = { Authorization: `Bearer ${accessToken}` };
+    const allContacts: any[] = [];
+    let page = 1;
+    const pageSize = 125;
+
+    // Filtra por created_at — contatos criados a partir desta data via LP
+    const sinceDate = params.since ? new Date(params.since) : new Date('2026-01-01T00:00:00');
+
+    while (true) {
+      this.logger.log(`getLpLeads: buscando página ${page}...`);
+      const listResp = await axios.get(
+        `${this.apiBaseUrl}/platform/segmentations/2925423/contacts`,
+        { headers, params: { page, page_size: pageSize, tag: 'capital-de-giro' }, timeout: 15000 },
+      );
+
+      const contacts: any[] = listResp.data?.contacts ?? [];
+      if (contacts.length === 0) break;
+
+      // Inclui contato se created_at >= sinceDate (novo lead neste período)
+      const filtered = contacts.filter((c) => new Date(c.created_at) >= sinceDate);
+      allContacts.push(...filtered);
+
+      // A API ordena por last_conversion_date desc. Paramos quando o created_at mais recente
+      // da página já é anterior ao corte (todos os próximos também serão mais antigos)
+      const newestCreated = contacts.reduce((max, c) =>
+        new Date(c.created_at) > new Date(max) ? c.created_at : max,
+        contacts[0].created_at,
+      );
+      if (new Date(newestCreated) < sinceDate || contacts.length < pageSize) break;
+
+      page++;
+    }
+
+    this.logger.log(`getLpLeads: total após filtro de data: ${allContacts.length}`);
+    return allContacts;
+  }
+
+  // Retorna resumo da LP capital-de-giro: visitantes, conversões, taxa
+  async getLpSummary(params: { startDate?: string; endDate?: string } = {}): Promise<any> {
+    const accessToken = await this.getValidAccessToken();
+    const today = new Date().toISOString().slice(0, 10);
+    const startDate = params.startDate ?? '2026-03-30';
+    const endDate = params.endDate ?? today;
+
+    const response = await axios.get(`${this.apiBaseUrl}/platform/analytics/conversions`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: { start_date: startDate, end_date: endDate, 'assets_type[]': 'LandingPage' },
+    });
+
+    const conversions: any[] = response.data?.conversions ?? [];
+    const lp = conversions.find((c) => c.asset_identifier === 'capital-de-giro');
+
+    return {
+      asset_identifier: 'capital-de-giro',
+      period: { start_date: startDate, end_date: endDate },
+      visits_count: lp ? Number(lp.visits_count) : 0,
+      conversion_count: lp ? lp.conversion_count : 0,
+      conversion_rate: lp ? lp.conversion_rate : 0,
+    };
   }
 
   async getConversions(params: { page?: number; pageSize?: number } = {}): Promise<any> {
