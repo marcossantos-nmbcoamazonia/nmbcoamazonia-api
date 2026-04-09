@@ -1,10 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
-import * as fs from 'fs';
-import * as path from 'path';
-
-// Arquivo local para persistir tokens entre restarts (simples e sem dependência de DB)
-const TOKEN_FILE = path.join(__dirname, '..', '..', '.rdstation-tokens.json');
+import { MongoClient, Db } from 'mongodb';
 
 interface TokenStore {
   access_token: string;
@@ -19,27 +15,55 @@ export class RdStationService {
   private readonly clientId = process.env.RDSTATION_CLIENT_ID ?? '';
   private readonly clientSecret = process.env.RDSTATION_CLIENT_SECRET ?? '';
   private readonly redirectUri = process.env.RDSTATION_REDIRECT_URI ?? '';
+  private readonly tokenUrl = 'https://api.rd.services/auth/token';
   private readonly authBaseUrl = 'https://api.rd.services/auth';
   private readonly apiBaseUrl = 'https://api.rd.services';
 
-  // ─── Token persistence ────────────────────────────────────────────────────
+  private db: Db | null = null;
 
-  private readTokens(): TokenStore | null {
+  // ─── MongoDB connection ───────────────────────────────────────────────────
+
+  private async getDb(): Promise<Db> {
+    if (this.db) return this.db;
+    const client = new MongoClient(process.env.DB_MONBO ?? '');
+    await client.connect();
+    this.db = client.db('rdstation');
+    return this.db;
+  }
+
+  // ─── Token persistence (MongoDB) ─────────────────────────────────────────
+
+  private async readTokens(): Promise<TokenStore | null> {
     try {
-      if (fs.existsSync(TOKEN_FILE)) {
-        return JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf8'));
-      }
-    } catch {
-      // ignore
+      const db = await this.getDb();
+      const doc = await db.collection('tokens').findOne({ _id: 'rdstation' as any });
+      if (!doc) return null;
+      return {
+        access_token: doc.access_token,
+        refresh_token: doc.refresh_token,
+        expires_at: doc.expires_at,
+      };
+    } catch (err) {
+      this.logger.error('Erro ao ler tokens do MongoDB:', err);
+      return null;
     }
-    return null;
   }
 
-  private writeTokens(tokens: TokenStore): void {
-    fs.writeFileSync(TOKEN_FILE, JSON.stringify(tokens, null, 2), 'utf8');
+  private async writeTokens(tokens: TokenStore): Promise<void> {
+    try {
+      const db = await this.getDb();
+      await db.collection('tokens').updateOne(
+        { _id: 'rdstation' as any },
+        { $set: { ...tokens, updated_at: new Date() } },
+        { upsert: true },
+      );
+      this.logger.log('Tokens RD Station salvos no MongoDB.');
+    } catch (err) {
+      this.logger.error('Erro ao salvar tokens no MongoDB:', err);
+    }
   }
 
-  // ─── OAuth URLs ───────────────────────────────────────────────────────────
+  // ─── OAuth URL ────────────────────────────────────────────────────────────
 
   getAuthorizationUrl(): string {
     const params = new URLSearchParams({
@@ -49,80 +73,97 @@ export class RdStationService {
     return `${this.authBaseUrl}/dialog?${params.toString()}`;
   }
 
-  // ─── Token exchange ───────────────────────────────────────────────────────
+  // ─── Salvar tokens manualmente (code já obtido externamente) ─────────────
+
+  async saveTokensManually(accessToken: string, refreshToken: string, expiresIn = 86400): Promise<void> {
+    await this.writeTokens({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      expires_at: Date.now() + expiresIn * 1000,
+    });
+  }
+
+  // ─── Token exchange (via callback) ───────────────────────────────────────
 
   async exchangeCodeForTokens(code: string): Promise<void> {
-    const response = await axios.post(`${this.authBaseUrl}/token`, {
-      client_id: this.clientId,
-      client_secret: this.clientSecret,
-      redirect_uri: this.redirectUri,
-      code,
-    });
+    const response = await axios.post(
+      `${this.tokenUrl}?token_by=code`,
+      {
+        client_id: this.clientId,
+        client_secret: this.clientSecret,
+        code,
+      },
+      { headers: { 'Content-Type': 'application/json' } },
+    );
 
     const { access_token, refresh_token, expires_in } = response.data;
-    this.writeTokens({
+    await this.writeTokens({
       access_token,
       refresh_token,
-      expires_at: Date.now() + expires_in * 1000,
+      expires_at: Date.now() + (expires_in ?? 86400) * 1000,
     });
-
-    this.logger.log('Tokens RD Station salvos com sucesso.');
   }
 
   // ─── Token refresh ────────────────────────────────────────────────────────
 
   private async refreshAccessToken(refreshToken: string): Promise<TokenStore> {
-    const response = await axios.post(`${this.authBaseUrl}/token`, {
-      client_id: this.clientId,
-      client_secret: this.clientSecret,
-      refresh_token: refreshToken,
-    });
+    const response = await axios.post(
+      `${this.tokenUrl}?token_by=refresh_token`,
+      {
+        client_id: this.clientId,
+        client_secret: this.clientSecret,
+        refresh_token: refreshToken,
+      },
+      { headers: { 'Content-Type': 'application/json' } },
+    );
 
     const { access_token, refresh_token, expires_in } = response.data;
     const store: TokenStore = {
       access_token,
-      refresh_token: refresh_token || refreshToken,
-      expires_at: Date.now() + expires_in * 1000,
+      refresh_token: refresh_token ?? refreshToken,
+      expires_at: Date.now() + (expires_in ?? 86400) * 1000,
     };
 
-    this.writeTokens(store);
+    await this.writeTokens(store);
     this.logger.log('Access token RD Station renovado.');
     return store;
   }
 
-  // ─── Get valid access token ───────────────────────────────────────────────
+  // ─── Get valid access token (com renovação automática) ───────────────────
 
   async getValidAccessToken(): Promise<string> {
-    let store = this.readTokens();
+    let store = await this.readTokens();
 
     if (!store) {
-      throw new Error('RD Station não autorizado. Acesse /rdstation/auth para iniciar.');
+      throw new Error('RD Station não autorizado. Acesse /rdstation/auth ou /rdstation/set-tokens.');
     }
 
-    // Renovar se expirar em menos de 5 minutos
-    if (Date.now() >= store.expires_at - 5 * 60 * 1000) {
+    // Tentar usar o token atual; se retornar 401, renovar
+    try {
+      const test = await axios.get(`${this.apiBaseUrl}/platform/contacts?page_size=1`, {
+        headers: { Authorization: `Bearer ${store.access_token}` },
+        validateStatus: (s) => s < 500,
+      });
+
+      if (test.status === 401) {
+        this.logger.log('Access token expirado, renovando via refresh_token...');
+        store = await this.refreshAccessToken(store.refresh_token);
+      }
+    } catch {
+      // Se a verificação falhar por outro motivo, tenta renovar mesmo assim
       store = await this.refreshAccessToken(store.refresh_token);
     }
 
     return store.access_token;
   }
 
-  // ─── Leads / Conversions ─────────────────────────────────────────────────
+  // ─── Leads / Contacts ────────────────────────────────────────────────────
 
-  async getLeads(params: {
-    page?: number;
-    pageSize?: number;
-    email?: string;
-  } = {}): Promise<any> {
+  async getLeads(params: { page?: number; pageSize?: number; email?: string } = {}): Promise<any> {
     const accessToken = await this.getValidAccessToken();
-
     const { page = 1, pageSize = 100, email } = params;
 
-    const query: Record<string, any> = {
-      page,
-      page_size: pageSize,
-    };
-
+    const query: Record<string, any> = { page, page_size: pageSize };
     if (email) query.email = email;
 
     const response = await axios.get(`${this.apiBaseUrl}/platform/contacts`, {
@@ -136,10 +177,7 @@ export class RdStationService {
     return response.data;
   }
 
-  async getConversions(params: {
-    page?: number;
-    pageSize?: number;
-  } = {}): Promise<any> {
+  async getConversions(params: { page?: number; pageSize?: number } = {}): Promise<any> {
     const accessToken = await this.getValidAccessToken();
     const { page = 1, pageSize = 100 } = params;
 
@@ -154,7 +192,8 @@ export class RdStationService {
     return response.data;
   }
 
-  isAuthorized(): boolean {
-    return this.readTokens() !== null;
+  async isAuthorized(): Promise<boolean> {
+    const tokens = await this.readTokens();
+    return tokens !== null;
   }
 }
