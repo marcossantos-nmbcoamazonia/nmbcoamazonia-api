@@ -50,17 +50,32 @@ export class RdStationService {
   }
 
   private async writeTokens(tokens: TokenStore): Promise<void> {
+    // Lança o erro para que o controller possa reportar falha real
+    const db = await this.getDb();
+    await db.collection('tokens').updateOne(
+      { _id: 'rdstation' as any },
+      { $set: { ...tokens, updated_at: new Date() } },
+      { upsert: true },
+    );
+    this.logger.log('Tokens RD Station salvos no MongoDB.');
+  }
+
+  async diagnose(): Promise<Record<string, any>> {
+    const result: Record<string, any> = {
+      db_monbo_set: !!process.env.DB_MONBO,
+      db_monbo_prefix: (process.env.DB_MONBO ?? '').slice(0, 20),
+    };
     try {
       const db = await this.getDb();
-      await db.collection('tokens').updateOne(
-        { _id: 'rdstation' as any },
-        { $set: { ...tokens, updated_at: new Date() } },
-        { upsert: true },
-      );
-      this.logger.log('Tokens RD Station salvos no MongoDB.');
+      result.db_connected = true;
+      const doc = await db.collection('tokens').findOne({ _id: 'rdstation' as any });
+      result.token_in_db = !!doc;
+      result.token_keys = doc ? Object.keys(doc) : [];
     } catch (err) {
-      this.logger.error('Erro ao salvar tokens no MongoDB:', err);
+      result.db_connected = false;
+      result.db_error = err.message;
     }
+    return result;
   }
 
   // ─── OAuth URL ────────────────────────────────────────────────────────────

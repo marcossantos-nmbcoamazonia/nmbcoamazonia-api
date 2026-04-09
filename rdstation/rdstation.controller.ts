@@ -70,6 +70,13 @@ export class RdStationController {
     }
   }
 
+  // ─── 3b. Diagnóstico ──────────────────────────────────────────────────────
+  @Get('diagnose')
+  @ApiOperation({ summary: 'Diagnóstico de conexão MongoDB e tokens' })
+  async diagnose() {
+    return this.rdStationService.diagnose();
+  }
+
   // ─── 4. Status ────────────────────────────────────────────────────────────
   @Get('status')
   @ApiOperation({ summary: 'Verificar status da autorização RD Station' })
