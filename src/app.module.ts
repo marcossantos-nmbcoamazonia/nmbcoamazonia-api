@@ -5,6 +5,7 @@ import { AppService } from "./app.service"
 import { GoogleModule } from "../google/google.module"
 import { DocsCampanhaModule } from "../docs_campanha/docs-campanha.module"
 import { RdStationModule } from "../rdstation/rdstation.module"
+import { AnalysisModule } from "../analysis/analysis.module"
 import googleConfig from "../config/google.config"
 
 @Module({
@@ -16,6 +17,7 @@ import googleConfig from "../config/google.config"
     GoogleModule,
     DocsCampanhaModule,
     RdStationModule,
+    AnalysisModule,
   ],
   controllers: [AppController],
   providers: [AppService],
