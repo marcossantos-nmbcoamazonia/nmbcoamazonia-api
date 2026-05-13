@@ -3,6 +3,8 @@ import { ApiTags, ApiOperation, ApiQuery, ApiBody, ApiResponse } from '@nestjs/s
 import { Response } from 'express';
 import { RdStationService } from './rdstation.service';
 
+const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
 @ApiTags('rdstation')
 @Controller('rdstation')
 export class RdStationController {
@@ -34,7 +36,7 @@ export class RdStationController {
       return res.status(500).send(`
         <html><body style="font-family:sans-serif;text-align:center;padding:60px">
           <h2 style="color:#dc2626">❌ Erro ao autorizar</h2>
-          <p>${error.message}</p>
+          <p>${errMsg(error)}</p>
         </body></html>
       `);
     }
@@ -66,7 +68,7 @@ export class RdStationController {
       await this.rdStationService.saveTokensManually(accessToken, refreshToken, expiresIn ?? 86400);
       return { success: true, message: 'Tokens salvos com sucesso.' };
     } catch (error) {
-      return { success: false, error: error.message };
+      return { success: false, error: errMsg(error) };
     }
   }
 
@@ -115,7 +117,7 @@ export class RdStationController {
       });
       return { success: true, data };
     } catch (error) {
-      return { success: false, error: error.message };
+      return { success: false, error: errMsg(error) };
     }
   }
 
@@ -135,24 +137,28 @@ export class RdStationController {
       });
       return { success: true, data };
     } catch (error) {
-      return { success: false, error: error.message };
+      return { success: false, error: errMsg(error) };
     }
   }
 
-  // ─── 7. Resumo da LP Capital de Giro (visitantes + conversões) ───────────
+  // ─── 7. Resumo de LP (visitantes + conversões) ────────────────────────────
   @Get('lp-summary')
-  @ApiOperation({ summary: 'Resumo da LP capital-de-giro: visitantes, conversões, taxa de conversão' })
+  @ApiOperation({ summary: 'Resumo de LP: visitantes, conversões, taxa de conversão. Filtre pela URL da LP via ?url=' })
   @ApiQuery({ name: 'start_date', required: false, type: String, description: 'Ex: 2026-03-30' })
   @ApiQuery({ name: 'end_date', required: false, type: String, description: 'Ex: 2026-04-09' })
+  @ApiQuery({ name: 'url', required: false, type: String, description: 'URL da LP, ex: http://basablog.rds.land/custeio' })
+  @ApiQuery({ name: 'identifier', required: false, type: String, description: 'Identificador direto da LP, ex: custeio' })
   async getLpSummary(
     @Query('start_date') startDate?: string,
     @Query('end_date') endDate?: string,
+    @Query('url') url?: string,
+    @Query('identifier') identifier?: string,
   ) {
     try {
-      const data = await this.rdStationService.getLpSummary({ startDate, endDate });
+      const data = await this.rdStationService.getLpSummary({ startDate, endDate, url, identifier });
       return { success: true, data };
     } catch (error) {
-      return { success: false, error: error.message };
+      return { success: false, error: errMsg(error) };
     }
   }
 
@@ -165,7 +171,7 @@ export class RdStationController {
       const contacts = await this.rdStationService.getLpLeads({ since });
       return { success: true, total: contacts.length, contacts };
     } catch (error) {
-      return { success: false, error: error.message };
+      return { success: false, error: errMsg(error) };
     }
   }
 }

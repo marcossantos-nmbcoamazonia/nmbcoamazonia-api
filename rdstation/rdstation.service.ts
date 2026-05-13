@@ -277,11 +277,17 @@ export class RdStationService {
   }
 
   // Retorna resumo da LP capital-de-giro: visitantes, conversões, taxa
-  async getLpSummary(params: { startDate?: string; endDate?: string } = {}): Promise<any> {
+  async getLpSummary(params: { startDate?: string; endDate?: string; url?: string; identifier?: string } = {}): Promise<any> {
     const accessToken = await this.getValidAccessToken();
     const today = new Date().toISOString().slice(0, 10);
-    const startDate = params.startDate ?? '2026-03-30';
+    const startDate = params.startDate ?? '2025-01-01';
     const endDate = params.endDate ?? today;
+
+    // Resolve identifier: explicit > extracted from url > default
+    const resolvedIdentifier =
+      params.identifier ??
+      (params.url ? params.url.split('/').filter(Boolean).pop() : undefined) ??
+      'capital-de-giro';
 
     const response = await axios.get(`${this.apiBaseUrl}/platform/analytics/conversions`, {
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -289,10 +295,10 @@ export class RdStationService {
     });
 
     const conversions: any[] = response.data?.conversions ?? [];
-    const lp = conversions.find((c) => c.asset_identifier === 'capital-de-giro');
+    const lp = conversions.find((c) => c.asset_identifier === resolvedIdentifier);
 
     return {
-      asset_identifier: 'capital-de-giro',
+      asset_identifier: resolvedIdentifier,
       period: { start_date: startDate, end_date: endDate },
       visits_count: lp ? Number(lp.visits_count) : 0,
       conversion_count: lp ? lp.conversion_count : 0,
