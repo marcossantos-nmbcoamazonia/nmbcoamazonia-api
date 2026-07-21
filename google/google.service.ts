@@ -74,11 +74,38 @@ export class GoogleService {
   }
 
   // GOOGLE SHEETS METHODS
+
+  /**
+   * Normaliza o range para evitar a ambiguidade da notação A1 do Google Sheets.
+   *
+   * Um nome de aba como "GA4" é sintaticamente idêntico a uma referência de
+   * célula (coluna GA, linha 4). Sem aspas, o Google interpreta como célula na
+   * aba padrão e retorna "exceeds grid limits". Ao envolver o nome da aba em
+   * aspas simples, forçamos a interpretação como nome de aba.
+   */
+  private normalizeRange(range: string): string {
+    const trimmed = (range ?? '').trim();
+
+    // Já qualificado com aba (Aba!Intervalo) ou já entre aspas: não altera.
+    if (trimmed.includes('!') || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+      return trimmed;
+    }
+
+    // Intervalo puro de células (ex.: "A1:Z200000"): não é nome de aba.
+    if (trimmed.includes(':')) {
+      return trimmed;
+    }
+
+    // Caso contrário é um nome de aba inteira. Coloca entre aspas (dobrando
+    // aspas internas, conforme a notação A1) para evitar colisão com célula.
+    return `'${trimmed.replace(/'/g, "''")}'`;
+  }
+
   async getSheetData(spreadsheetId: string, range: string) {
     try {
       const response = await this.sheets.spreadsheets.values.get({
         spreadsheetId,
-        range,
+        range: this.normalizeRange(range),
       });
 
       const rows = response.data.values || [];
